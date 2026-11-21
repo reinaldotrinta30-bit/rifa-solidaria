@@ -91,6 +91,18 @@ export async function verificarPinRifa(pin: string): Promise<boolean> {
   return Boolean(data);
 }
 
+export async function verificarPinConfig(pin: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc('verificar_pin_config', {
+    p_pin: pin.trim(),
+  });
+
+  if (error) {
+    throw extrairErro(error, 'Erro ao validar senha da aba Configurações.');
+  }
+
+  return Boolean(data);
+}
+
 export async function adminCarregarPontos(pin: string): Promise<PontoAdmin[]> {
   const { data, error } = await supabase.rpc('admin_carregar_pontos', {
     p_pin: pin.trim(),

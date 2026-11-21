@@ -8,7 +8,6 @@ import {
   Vendedor,
 } from '@/types/rifa';
 import { formatarMoeda, formatarPonto } from '@/lib/formatadores';
-import { gerarECompartilharImagemCartela } from '@/lib/geradorImagemCartela';
 
 interface CartelaPublicaProps {
   config: ConfiguracaoPublica;
@@ -48,21 +47,6 @@ export function CartelaPublica({
   );
   const [statusFiltro, setStatusFiltro] = useState<StatusPonto | 'TODOS'>('TODOS');
   const [buscaNumero, setBuscaNumero] = useState('');
-
-  const [gerandoImagem, setGerandoImagem] = useState(false);
-
-const handleBaixarArte = async () => {
-  setGerandoImagem(true);
-  try {
-    await gerarECompartilharImagemCartela({
-      config,
-      pontos,
-      vendedor: vendedorAtivo,
-    });
-  } finally {
-    setGerandoImagem(false);
-  }
-};
 
   // Sincroniza quando o link ?v=nome é detectado na carga inicial
   React.useEffect(() => {
@@ -344,7 +328,6 @@ const handleBaixarArte = async () => {
           {pontosFiltrados.map((ponto) => {
             const selecionado = selecionados.includes(ponto.numero);
             const livre = ponto.status === 'DISPONIVEL';
-            const reservado = ponto.status === 'RESERVADO';
             const pago = ponto.status === 'PAGO';
 
             return (

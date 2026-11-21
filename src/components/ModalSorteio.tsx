@@ -244,7 +244,7 @@ export function ModalSorteio({
             disabled={limpando || sorteando}
             className="w-full py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 hover:border-red-500/40 text-xs font-semibold text-zinc-400 hover:text-red-300 cursor-pointer"
           >
-            {limpando ? 'Limpando...' : '🗑️ Limpar resultado (se foi apenas teste)'}
+            {limpando ? 'Limpando...' : '🗑️ Limpar resultado'}
           </button>
         )}
       </div>

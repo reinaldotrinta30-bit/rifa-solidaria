@@ -5,6 +5,7 @@ import {
   ConfiguracaoPublica,
   FormaPagamento,
   PontoAdmin,
+  ResultadoSorteio,
   StatusPonto,
   Vendedor,
 } from '@/types/rifa';
@@ -17,10 +18,15 @@ import {
 import {
   adminAtualizarConfig,
   adminCarregarPontos,
+  adminLimparTeste,
+  adminPopularTeste,
   adminSalvarPontos,
+  adminSimularSorteioTeste,
   exportarCsvRifa,
   verificarPinRifa,
+  verificarPinConfig,
 } from '@/lib/rifaService';
+import { gerarECompartilharImagemCartela } from '@/lib/geradorImagemCartela';
 import { ModalSorteio } from '@/components/ModalSorteio';
 
 interface PainelOrganizacaoProps {
@@ -82,6 +88,41 @@ export function PainelOrganizacao({
   const [cfgNovoPin, setCfgNovoPin] = useState('');
   const [salvandoCfg, setSalvandoCfg] = useState(false);
 
+  // Estados de Arte Stories & Zona de Testes
+  const [gerandoArte, setGerandoArte] = useState(false);
+  const [executandoTeste, setExecutandoTeste] = useState(false);
+  const [simulacaoSorteio, setSimulacaoSorteio] = useState<ResultadoSorteio | null>(null);
+  const [roletaTeste, setRoletaTeste] = useState<number | null>(null);
+
+  // Bloqueio exclusivo da aba PIX & Configurações
+  const [pinConfig, setPinConfig] = useState('');
+  const [configLiberada, setConfigLiberada] = useState(false);
+  const [verificandoConfig, setVerificandoConfig] = useState(false);
+  const [erroConfig, setErroConfig] = useState<string | null>(null);
+
+  const handleDesbloquearConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErroConfig(null);
+    if (!pinConfig.trim()) {
+      setErroConfig('Informe a senha exclusiva.');
+      return;
+    }
+
+    setVerificandoConfig(true);
+    try {
+      const ok = await verificarPinConfig(pinConfig.trim());
+      if (!ok) {
+        setErroConfig('Senha incorreta. Acesso restrito.');
+        return;
+      }
+      setConfigLiberada(true);
+    } catch (err) {
+      setErroConfig(err instanceof Error ? err.message : 'Erro ao validar senha.');
+    } finally {
+      setVerificandoConfig(false);
+    }
+  };
+
   const mostrarAviso = (texto: string) => {
     setAviso(texto);
     setTimeout(() => setAviso(null), 3000);
@@ -99,6 +140,95 @@ export function PainelOrganizacao({
       setErro(err instanceof Error ? err.message : 'Erro ao atualizar dados.');
     } finally {
       setCarregando(false);
+    }
+  };
+
+  const handleBaixarArte = async (vendedor: Vendedor | null) => {
+    setGerandoArte(true);
+    setErro(null);
+    try {
+      const modo = await gerarECompartilharImagemCartela({
+        config,
+        pontos,
+        vendedor,
+      });
+      mostrarAviso(
+        modo === 'compartilhado'
+          ? 'Arte pronta para compartilhar!'
+          : 'Imagem PNG baixada com sucesso!'
+      );
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : 'Erro ao gerar imagem.');
+    } finally {
+      setGerandoArte(false);
+    }
+  };
+
+  const handlePopularTeste = async () => {
+    setErro(null);
+    setExecutandoTeste(true);
+    try {
+      const qtd = await adminPopularTeste(pinConfig);
+      await recarregarTudo();
+      mostrarAviso(`${qtd} pontos fictícios de teste gerados nas cartelas!`);
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : 'Erro ao gerar dados de teste.');
+    } finally {
+      setExecutandoTeste(false);
+    }
+  };
+
+  const handleSimularSorteioTeste = async () => {
+    setErro(null);
+    setExecutandoTeste(true);
+    setSimulacaoSorteio(null);
+
+    const pagosAtuais = pontos.filter((p) => p.status === 'PAGO');
+    const intervalo = window.setInterval(() => {
+      if (pagosAtuais.length > 0) {
+        const idx = Math.floor(Math.random() * pagosAtuais.length);
+        setRoletaTeste(pagosAtuais[idx].numero);
+      } else {
+        setRoletaTeste(Math.floor(Math.random() * 175) + 1);
+      }
+    }, 75);
+
+    try {
+      const [res] = await Promise.all([
+        adminSimularSorteioTeste(pinConfig),
+        new Promise((r) => setTimeout(r, 2500)),
+      ]);
+      window.clearInterval(intervalo);
+      setRoletaTeste(null);
+      setSimulacaoSorteio(res);
+    } catch (err) {
+      window.clearInterval(intervalo);
+      setRoletaTeste(null);
+      setErro(err instanceof Error ? err.message : 'Erro na simulação do sorteio.');
+    } finally {
+      setExecutandoTeste(false);
+    }
+  };
+
+  const handleLimparTeste = async () => {
+    if (
+      !window.confirm(
+        'Remover todos os pontos fictícios de teste? (Compradores reais NÃO serão apagados.)'
+      )
+    ) {
+      return;
+    }
+    setErro(null);
+    setExecutandoTeste(true);
+    try {
+      const removidos = await adminLimparTeste(pinConfig);
+      setSimulacaoSorteio(null);
+      await recarregarTudo();
+      mostrarAviso(`${removidos} pontos fictícios removidos. Cartela limpa!`);
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : 'Erro ao limpar dados de teste.');
+    } finally {
+      setExecutandoTeste(false);
     }
   };
 
@@ -371,7 +501,7 @@ export function PainelOrganizacao({
     setSalvandoCfg(true);
     try {
       await adminAtualizarConfig({
-        pin,
+        pin: pinConfig,
         titulo: cfgTitulo,
         subtitulo: cfgSubtitulo,
         data_sorteio: cfgDataSorteio,
@@ -464,7 +594,15 @@ export function PainelOrganizacao({
           ← Cartela Pública
         </button>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            disabled={gerandoArte}
+            onClick={() => handleBaixarArte(null)}
+            className="px-3 py-2 rounded-xl bg-amber-400/15 border border-amber-400/40 text-xs font-bold text-amber-300 hover:bg-amber-400/25 cursor-pointer disabled:opacity-50"
+          >
+            {gerandoArte ? 'Gerando...' : '📸 Arte Geral (1–175)'}
+          </button>
           <button
             type="button"
             onClick={() => recarregarTudo()}
@@ -476,7 +614,7 @@ export function PainelOrganizacao({
           <button
             type="button"
             onClick={() => exportarCsvRifa(pontos, vendedores, config.valor_ponto)}
-            className="px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-xs font-semibold text-amber-300 hover:border-amber-400/40 cursor-pointer"
+            className="px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-xs font-semibold text-zinc-200 hover:border-amber-400/40 cursor-pointer"
           >
             📥 CSV
           </button>
@@ -577,7 +715,7 @@ export function PainelOrganizacao({
                 </p>
               </div>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
                   onClick={() => copiarLinkVendedor(statMembroAtual.vendedor)}
@@ -592,10 +730,18 @@ export function PainelOrganizacao({
                 >
                   📋 Relatório
                 </button>
+                <button
+                  type="button"
+                  disabled={gerandoArte}
+                  onClick={() => handleBaixarArte(statMembroAtual.vendedor)}
+                  className="px-2.5 py-1.5 rounded-xl bg-zinc-950 border border-zinc-800 text-[11px] font-bold text-amber-300 hover:border-amber-400/40 cursor-pointer disabled:opacity-50"
+                >
+                  {gerandoArte ? '...' : '📸 Stories'}
+                </button>
               </div>
             </div>
 
-            {/* 4 Mini KPIs do Membro */}
+            {/* 3 Mini KPIs do Membro */}
             <div className="grid grid-cols-3 gap-2">
               <div className="rounded-xl bg-zinc-950/80 border border-emerald-500/25 p-2.5">
                 <span className="block text-[10px] font-bold uppercase text-emerald-400">
@@ -1041,141 +1187,263 @@ export function PainelOrganizacao({
         />
       )}
 
-      {/* ================= ABA 4: CONFIGURAÇÕES PIX & RIFA ================= */}
-      {aba === 'config' && (
-        <form
-          onSubmit={handleSalvarConfig}
-          className="rounded-2xl bg-zinc-900/90 border border-zinc-800 p-5 space-y-4"
-        >
-          <div>
+      {/* ================= ABA 4: CONFIGURAÇÕES PIX & ZONA DE TESTES ================= */}
+      {aba === 'config' && !configLiberada && (
+        <div className="rounded-2xl bg-zinc-900/90 border border-zinc-800 p-6 max-w-md mx-auto space-y-4">
+          <div className="text-center">
+            <span className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-amber-400/15 border border-amber-400/40 text-xl mb-2">
+              🔐
+            </span>
             <h2 className="text-lg font-extrabold text-white">
               Chave PIX & Configurações
             </h2>
-            <p className="text-xs text-zinc-400 mt-0.5">
-              Alterações aqui aparecem imediatamente na cartela pública e na tela de PIX.
+            <p className="text-xs text-zinc-400 mt-1">
+              Acesso exclusivo do administrador geral. Digite sua senha para desbloquear.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-zinc-300 mb-1">
-                Título da Rifa
-              </label>
-              <input
-                type="text"
-                value={cfgTitulo}
-                onChange={(e) => setCfgTitulo(e.target.value)}
-                className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-zinc-300 mb-1">
-                Data do Sorteio
-              </label>
-              <input
-                type="text"
-                value={cfgDataSorteio}
-                onChange={(e) => setCfgDataSorteio(e.target.value)}
-                placeholder="28/11/2026"
-                className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-zinc-300 mb-1">
-              Frase de descrição (subtítulo)
-            </label>
-            <input
-              type="text"
-              value={cfgSubtitulo}
-              onChange={(e) => setCfgSubtitulo(e.target.value)}
-              className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none"
-            />
-          </div>
-
-          <hr className="border-zinc-800" />
-
-          <div>
-            <label className="block text-xs font-bold text-amber-300 mb-1">
-              Chave PIX da Danyelle *
-            </label>
-            <input
-              type="text"
-              value={cfgPixChave}
-              onChange={(e) => setCfgPixChave(e.target.value)}
-              placeholder="CPF, telefone, e-mail ou chave aleatória"
-              className="w-full rounded-xl bg-zinc-950 border border-amber-400/40 focus:border-amber-400 px-3.5 py-2.5 text-sm font-mono text-white outline-none"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-zinc-300 mb-1">
-                Nome do Titular do PIX
-              </label>
-              <input
-                type="text"
-                value={cfgPixTitular}
-                onChange={(e) => setCfgPixTitular(e.target.value)}
-                placeholder="Ex: Danyelle Silva"
-                className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-zinc-300 mb-1">
-                Banco (opcional)
-              </label>
-              <input
-                type="text"
-                value={cfgPixBanco}
-                onChange={(e) => setCfgPixBanco(e.target.value)}
-                placeholder="Ex: Nubank / Banco do Brasil"
-                className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-zinc-300 mb-1">
-              WhatsApp para receber os comprovantes (com DDD)
-            </label>
-            <input
-              type="tel"
-              inputMode="tel"
-              value={cfgWhats}
-              onChange={(e) => setCfgWhats(aplicarMascaraTelefone(e.target.value))}
-              placeholder="(98) 99999-9999"
-              className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none"
-            />
-          </div>
-
-          <hr className="border-zinc-800" />
-
-          <div>
-            <label className="block text-xs font-bold text-zinc-300 mb-1">
-              Trocar PIN da Organização (deixe em branco para manter o atual)
-            </label>
+          <form onSubmit={handleDesbloquearConfig} className="space-y-3">
             <input
               type="password"
               inputMode="numeric"
-              value={cfgNovoPin}
-              onChange={(e) => setCfgNovoPin(e.target.value)}
-              placeholder="Novo PIN (mínimo 4 dígitos)"
-              className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none"
+              value={pinConfig}
+              onChange={(e) => setPinConfig(e.target.value)}
+              placeholder="Senha exclusiva"
+              className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-4 py-3 text-center text-lg tracking-[0.35em] font-mono text-white outline-none"
             />
+
+            {erroConfig && (
+              <div className="rounded-xl bg-red-500/10 border border-red-500/35 px-3 py-2 text-xs text-red-300 text-center">
+                ⚠️ {erroConfig}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={verificandoConfig}
+              className="w-full gold-button py-3 rounded-2xl font-extrabold text-sm disabled:opacity-60 cursor-pointer"
+            >
+              {verificandoConfig ? 'Verificando...' : 'Desbloquear Configurações'}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {aba === 'config' && configLiberada && (
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                setConfigLiberada(false);
+                setPinConfig('');
+              }}
+              className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-amber-400/40 text-[11px] font-bold text-zinc-300 cursor-pointer"
+            >
+              🔒 Bloquear aba novamente
+            </button>
           </div>
 
-          <button
-            type="submit"
-            disabled={salvandoCfg}
-            className="w-full gold-button py-3.5 rounded-2xl font-extrabold text-sm disabled:opacity-60 cursor-pointer"
+          <form
+            onSubmit={handleSalvarConfig}
+            className="rounded-2xl bg-zinc-900/90 border border-zinc-800 p-5 space-y-4"
           >
-            {salvandoCfg ? 'Salvando...' : 'Salvar Configurações'}
-          </button>
-        </form>
+            <div>
+              <h2 className="text-lg font-extrabold text-white">
+                Chave PIX & Configurações
+              </h2>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Alterações aqui aparecem imediatamente na cartela pública e na tela de PIX.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-zinc-300 mb-1">
+                  Título da Rifa
+                </label>
+                <input
+                  type="text"
+                  value={cfgTitulo}
+                  onChange={(e) => setCfgTitulo(e.target.value)}
+                  className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-300 mb-1">
+                  Data do Sorteio
+                </label>
+                <input
+                  type="text"
+                  value={cfgDataSorteio}
+                  onChange={(e) => setCfgDataSorteio(e.target.value)}
+                  placeholder="28/11/2026"
+                  className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-zinc-300 mb-1">
+                Frase de descrição (subtítulo)
+              </label>
+              <input
+                type="text"
+                value={cfgSubtitulo}
+                onChange={(e) => setCfgSubtitulo(e.target.value)}
+                className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none"
+              />
+            </div>
+
+            <hr className="border-zinc-800" />
+
+            <div>
+              <label className="block text-xs font-bold text-amber-300 mb-1">
+                Chave PIX da Danyelle *
+              </label>
+              <input
+                type="text"
+                value={cfgPixChave}
+                onChange={(e) => setCfgPixChave(e.target.value)}
+                placeholder="CPF, telefone, e-mail ou chave aleatória"
+                className="w-full rounded-xl bg-zinc-950 border border-amber-400/40 focus:border-amber-400 px-3.5 py-2.5 text-sm font-mono text-white outline-none"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-zinc-300 mb-1">
+                  Nome do Titular do PIX
+                </label>
+                <input
+                  type="text"
+                  value={cfgPixTitular}
+                  onChange={(e) => setCfgPixTitular(e.target.value)}
+                  placeholder="Ex: Danyelle Silva"
+                  className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-300 mb-1">
+                  Banco (opcional)
+                </label>
+                <input
+                  type="text"
+                  value={cfgPixBanco}
+                  onChange={(e) => setCfgPixBanco(e.target.value)}
+                  placeholder="Ex: Nubank / Banco do Brasil"
+                  className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-zinc-300 mb-1">
+                WhatsApp para receber os comprovantes (com DDD)
+              </label>
+              <input
+                type="tel"
+                inputMode="tel"
+                value={cfgWhats}
+                onChange={(e) => setCfgWhats(aplicarMascaraTelefone(e.target.value))}
+                placeholder="(98) 99185-2147"
+                className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none"
+              />
+            </div>
+
+            <hr className="border-zinc-800" />
+
+            <div>
+              <label className="block text-xs font-bold text-zinc-300 mb-1">
+                Trocar PIN da Organização (deixe em branco para manter o atual)
+              </label>
+              <input
+                type="password"
+                inputMode="numeric"
+                value={cfgNovoPin}
+                onChange={(e) => setCfgNovoPin(e.target.value)}
+                placeholder="Novo PIN (mínimo 4 dígitos)"
+                className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={salvandoCfg}
+              className="w-full gold-button py-3.5 rounded-2xl font-extrabold text-sm disabled:opacity-60 cursor-pointer"
+            >
+              {salvandoCfg ? 'Salvando...' : 'Salvar Configurações'}
+            </button>
+          </form>
+
+          {/* ZONA DE TESTES (SOMENTE ORGANIZAÇÃO) */}
+          <div className="rounded-2xl bg-zinc-900/80 border border-dashed border-amber-400/40 p-5 space-y-4">
+            <div>
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-amber-400">
+                Ambiente de Validação • Somente Organização
+              </p>
+              <h3 className="text-base font-extrabold text-white mt-0.5">
+                🧪 Testar Sistema & Simular Sorteio
+              </h3>
+              <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                Gere vendas fictícias para testar as abas dos vendedores, a arte oficial
+                marcada e a roleta do sorteio. Ao clicar em limpar, apenas os registros de
+                teste são removidos (vendas reais ficam intactas).
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <button
+                type="button"
+                disabled={executandoTeste}
+                onClick={handlePopularTeste}
+                className="py-3 px-3 rounded-xl bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/40 text-xs font-extrabold text-amber-300 cursor-pointer disabled:opacity-50"
+              >
+                🧪 1. Gerar Dados Teste
+              </button>
+
+              <button
+                type="button"
+                disabled={executandoTeste}
+                onClick={handleSimularSorteioTeste}
+                className="py-3 px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-xs font-extrabold text-emerald-300 cursor-pointer disabled:opacity-50"
+              >
+                🎲 2. Simular Sorteio
+              </button>
+
+              <button
+                type="button"
+                disabled={executandoTeste}
+                onClick={handleLimparTeste}
+                className="py-3 px-3 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/35 text-xs font-extrabold text-red-300 cursor-pointer disabled:opacity-50"
+              >
+                🧹 3. Limpar Testes
+              </button>
+            </div>
+
+            {(roletaTeste !== null || simulacaoSorteio) && (
+              <div className="rounded-2xl bg-zinc-950 border border-amber-400/35 p-4 text-center space-y-1">
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-amber-400">
+                  {roletaTeste !== null
+                    ? 'Girando simulação...'
+                    : 'Simulação Concluída (Não publicado)'}
+                </span>
+                <p className="font-display text-4xl font-black gold-gradient-text">
+                  Nº {formatarPonto(roletaTeste ?? simulacaoSorteio!.numero)}
+                </p>
+                {roletaTeste === null && simulacaoSorteio && (
+                  <p className="text-xs text-zinc-300">
+                    <strong>{simulacaoSorteio.ganhador_nome}</strong> • Cartela de{' '}
+                    <span className="text-amber-300">{simulacaoSorteio.vendedor_nome}</span>{' '}
+                    (entre {simulacaoSorteio.total_elegiveis} pontos pagos)
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* ================= MODAL DE EDIÇÃO / CADASTRO MANUAL ================= */}
@@ -1261,7 +1529,7 @@ export function PainelOrganizacao({
                     forma_pagamento: e.target.value as FormaPagamento,
                   })
                 }
-                className="w-full rounded-xl bg-zinc-900 border border-zinc-800 focus:border-amber-400 px-3 py-2.5 text-xs text-white outline-none"
+                className="w-full rounded-xl bg-zinc-900 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-xs text-white outline-none"
               >
                 <option value="PIX">PIX</option>
                 <option value="DINHEIRO">Dinheiro</option>
