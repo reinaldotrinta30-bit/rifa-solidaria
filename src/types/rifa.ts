@@ -27,6 +27,14 @@ export interface Vendedor {
   ordem: number;
 }
 
+export interface VendedorContato {
+  id: number;
+  nome: string;
+  ponto_inicio: number;
+  ponto_fim: number;
+  whatsapp: string;
+}
+
 export interface PontoPublico {
   numero: number;
   vendedor_id: number;
@@ -54,6 +62,8 @@ export interface ResultadoReserva {
   numeros: number[];
   quantidade: number;
   valor_total: number;
+  destino_vendedor_nome: string;
+  destino_whatsapp: string;
 }
 
 export interface ResultadoSorteio {

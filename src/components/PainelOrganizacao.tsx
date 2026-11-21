@@ -8,6 +8,7 @@ import {
   ResultadoSorteio,
   StatusPonto,
   Vendedor,
+  VendedorContato,
 } from '@/types/rifa';
 import {
   aplicarMascaraTelefone,
@@ -25,6 +26,8 @@ import {
   exportarCsvRifa,
   verificarPinRifa,
   verificarPinConfig,
+  adminCarregarWhatsappsVendedores,
+  adminSalvarWhatsappsVendedores,
 } from '@/lib/rifaService';
 import { gerarECompartilharImagemCartela } from '@/lib/geradorImagemCartela';
 import { ModalSorteio } from '@/components/ModalSorteio';
@@ -115,11 +118,38 @@ export function PainelOrganizacao({
         setErroConfig('Senha incorreta. Acesso restrito.');
         return;
       }
+
+      const listaContatos = await adminCarregarWhatsappsVendedores(pinConfig.trim());
+      setContatosVendedores(listaContatos);
+
+
       setConfigLiberada(true);
     } catch (err) {
       setErroConfig(err instanceof Error ? err.message : 'Erro ao validar senha.');
     } finally {
       setVerificandoConfig(false);
+    }
+  };
+
+  const [contatosVendedores, setContatosVendedores] = useState<VendedorContato[]>([]);
+  const [salvandoContatos, setSalvandoContatos] = useState(false);
+
+  const handleSalvarContatosVendedores = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErro(null);
+    setSalvandoContatos(true);
+    try {
+      await adminSalvarWhatsappsVendedores(
+        pinConfig,
+        contatosVendedores.map((c) => ({ id: c.id, whatsapp: c.whatsapp }))
+      );
+      mostrarAviso('WhatsApps dos vendedores atualizados com sucesso!');
+    } catch (err) {
+      setErro(
+        err instanceof Error ? err.message : 'Erro ao salvar WhatsApps dos vendedores.'
+      );
+    } finally {
+      setSalvandoContatos(false);
     }
   };
 
@@ -1186,6 +1216,59 @@ export function PainelOrganizacao({
           onAtualizar={() => recarregarTudo()}
         />
       )}
+
+      {/* WHATSAPP DOS VENDEDORES (ROTEAMENTO DE COMPROVANTES) */}
+          <form
+            onSubmit={handleSalvarContatosVendedores}
+            className="rounded-2xl bg-zinc-900/90 border border-zinc-800 p-5 space-y-4"
+          >
+            <div>
+              <h3 className="text-base font-extrabold text-white">
+                📱 WhatsApp dos Vendedores (Comprovantes)
+              </h3>
+              <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                Cada comprovante vai automaticamente para o WhatsApp do vendedor responsável
+                pelos pontos comprados. Em compras mistas, vai para quem tiver mais pontos
+                naquela compra (desempate pela maior venda total).
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {contatosVendedores.map((c) => (
+                <div key={c.id}>
+                  <label className="block text-xs font-bold text-zinc-300 mb-1">
+                    {c.nome}{' '}
+                    <span className="text-[10px] font-mono text-zinc-500">
+                      ({formatarPonto(c.ponto_inicio)}–{formatarPonto(c.ponto_fim)})
+                    </span>
+                  </label>
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    value={c.whatsapp}
+                    onChange={(e) => {
+                      const formatado = aplicarMascaraTelefone(e.target.value);
+                      setContatosVendedores((prev) =>
+                        prev.map((item) =>
+                          item.id === c.id ? { ...item, whatsapp: formatado } : item
+                        )
+                      );
+                    }}
+                    placeholder="(98) 99999-9999"
+                    className="w-full rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-400 px-3.5 py-2.5 text-sm font-mono text-white outline-none"
+                  />
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="submit"
+              disabled={salvandoContatos}
+              className="w-full gold-button py-3 rounded-2xl font-extrabold text-sm disabled:opacity-60 cursor-pointer"
+            >
+              {salvandoContatos ? 'Salvando contatos...' : 'Salvar WhatsApps dos Vendedores'}
+            </button>
+          </form>
 
       {/* ================= ABA 4: CONFIGURAÇÕES PIX & ZONA DE TESTES ================= */}
       {aba === 'config' && !configLiberada && (

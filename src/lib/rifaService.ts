@@ -8,6 +8,7 @@ import {
   ResultadoSorteio,
   StatusPonto,
   Vendedor,
+  VendedorContato,
 } from '@/types/rifa';
 import { formatarPonto } from '@/lib/formatadores';
 
@@ -28,7 +29,7 @@ export interface SnapshotPublicoRifa {
 export async function carregarDadosPublicos(): Promise<SnapshotPublicoRifa> {
   const [resConfig, resVendedores, resPontos] = await Promise.all([
     supabase.from('configuracoes_publico').select('*').single(),
-    supabase.from('vendedores').select('*').order('ordem', { ascending: true }),
+    supabase.from('vendedores_publico').select('*').order('ordem', { ascending: true }),
     supabase.from('pontos_publico').select('*').order('numero', { ascending: true }),
   ]);
 
@@ -72,11 +73,13 @@ export async function reservarPontosPublico(params: {
   }
 
   const res = data as ResultadoReserva;
-  return {
-    numeros: res.numeros ?? params.numeros,
-    quantidade: Number(res.quantidade) || params.numeros.length,
-    valor_total: Number(res.valor_total) || 0,
-  };
+return {
+  numeros: res.numeros ?? params.numeros,
+  quantidade: Number(res.quantidade) || params.numeros.length,
+  valor_total: Number(res.valor_total) || 0,
+  destino_vendedor_nome: res.destino_vendedor_nome || 'Organização',
+  destino_whatsapp: res.destino_whatsapp || '',
+};
 }
 
 export async function verificarPinRifa(pin: string): Promise<boolean> {
@@ -168,6 +171,36 @@ export async function adminAtualizarConfig(params: {
 
   if (error) {
     throw extrairErro(error, 'Erro ao salvar configurações.');
+  }
+
+  return Boolean(data);
+}
+
+export async function adminCarregarWhatsappsVendedores(
+  pinConfig: string
+): Promise<VendedorContato[]> {
+  const { data, error } = await supabase.rpc('admin_carregar_whatsapps_vendedores', {
+    p_pin: pinConfig.trim(),
+  });
+
+  if (error) {
+    throw extrairErro(error, 'Erro ao carregar WhatsApps dos vendedores.');
+  }
+
+  return (data ?? []) as VendedorContato[];
+}
+
+export async function adminSalvarWhatsappsVendedores(
+  pinConfig: string,
+  itens: { id: number; whatsapp: string }[]
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc('admin_salvar_whatsapps_vendedores', {
+    p_pin: pinConfig.trim(),
+    p_itens: itens,
+  });
+
+  if (error) {
+    throw extrairErro(error, 'Erro ao salvar WhatsApps dos vendedores.');
   }
 
   return Boolean(data);

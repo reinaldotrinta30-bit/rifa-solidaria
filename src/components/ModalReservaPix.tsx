@@ -88,14 +88,32 @@ export function ModalReservaPix({
     }
   };
 
+  const detalhePorVendedor = useMemo(() => {
+    const nums = reserva?.numeros ?? selecionados;
+    const mapa = new Map<string, number[]>();
+    nums.forEach((n) => {
+      const v = vendedores.find((item) => n >= item.ponto_inicio && n <= item.ponto_fim);
+      const chave = v ? v.nome : 'Outros';
+      const lista = mapa.get(chave) ?? [];
+      lista.push(n);
+      mapa.set(chave, lista);
+    });
+    return Array.from(mapa.entries()).map(
+      ([vNome, lista]) => `${vNome} (${lista.map(formatarPonto).join(', ')})`
+    );
+  }, [reserva, selecionados, vendedores]);
+
   const linkWhatsAppComprovante = useMemo(() => {
     if (!reserva) return '#';
+    const destinoWpp = reserva.destino_whatsapp || config.whatsapp_comprovante;
     const msg = [
-      `🎟️ *${config.titulo.toUpperCase()} — COMPROVANTE DE PIX*`,
+      `*${config.titulo.toUpperCase()} — COMPROVANTE DE PIX*`,
       `Comprador: *${nome.trim()}*`,
       `WhatsApp: ${whatsapp.trim()}`,
       `Pontos escolhidos: *${reserva.numeros.map(formatarPonto).join(', ')}*`,
-      vendedoresResponsaveis.length > 0
+      detalhePorVendedor.length > 1
+        ? `Divisão por cartela: ${detalhePorVendedor.join(' | ')}`
+        : vendedoresResponsaveis.length > 0
         ? `Cartela de: ${vendedoresResponsaveis.join(', ')}`
         : null,
       `Valor total: *${formatarMoeda(reserva.valor_total)}*`,
@@ -105,8 +123,8 @@ export function ModalReservaPix({
       .filter((linha) => linha !== null)
       .join('\n');
 
-    return gerarLinkWhatsApp(config.whatsapp_comprovante, msg);
-  }, [reserva, config, nome, whatsapp, vendedoresResponsaveis]);
+    return gerarLinkWhatsApp(destinoWpp, msg);
+  }, [reserva, config, nome, whatsapp, detalhePorVendedor, vendedoresResponsaveis]);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
@@ -272,14 +290,16 @@ export function ModalReservaPix({
 
             {/* Botão WhatsApp */}
             <a
-              href={linkWhatsAppComprovante}
-              target="_blank"
-              rel="noreferrer"
-              className="w-full py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-extrabold text-sm flex items-center justify-center gap-2 transition-colors"
-            >
-              <span>💬</span>
-              <span>Enviar Comprovante no WhatsApp</span>
-            </a>
+  href={linkWhatsAppComprovante}
+  target="_blank"
+  rel="noreferrer"
+  className="w-full py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-extrabold text-sm flex items-center justify-center gap-2 transition-colors"
+>
+  <span>💬</span>
+  <span>
+    Enviar Comprovante p/ {reserva.destino_vendedor_nome || 'Organização'}
+  </span>
+</a>
 
             <button
               type="button"
