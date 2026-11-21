@@ -24,12 +24,16 @@ export function validarTelefoneBR(valor: string): boolean {
 
 export function gerarLinkWhatsApp(telefone: string, mensagem: string): string {
   const digitos = telefone.replace(/\D/g, '');
+  const textoCodificado = encodeURIComponent(mensagem.normalize('NFC'));
+
   if (digitos.length < 10) {
-    return `https://wa.me/?text=${encodeURIComponent(mensagem)}`;
+    return `https://api.whatsapp.com/send?text=${textoCodificado}`;
   }
+
   const comDDI =
     digitos.startsWith('55') && digitos.length >= 12 ? digitos : `55${digitos}`;
-  return `https://wa.me/${comDDI}?text=${encodeURIComponent(mensagem)}`;
+
+  return `https://api.whatsapp.com/send?phone=${comDDI}&text=${textoCodificado}`;
 }
 
 export function formatarDataHoraBR(iso: string | null): string {
