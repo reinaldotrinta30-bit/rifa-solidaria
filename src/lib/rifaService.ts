@@ -189,6 +189,38 @@ export async function adminLimparSorteio(pin: string): Promise<boolean> {
   return Boolean(data);
 }
 
+export async function adminPopularTeste(pin: string): Promise<number> {
+  const { data, error } = await supabase.rpc('admin_popular_teste', {
+    p_pin: pin.trim(),
+  });
+  if (error) {
+    throw extrairErro(error, 'Erro ao gerar dados fictícios de teste.');
+  }
+  return Number((data as { criados?: number })?.criados) || 0;
+}
+
+export async function adminSimularSorteioTeste(
+  pin: string
+): Promise<ResultadoSorteio> {
+  const { data, error } = await supabase.rpc('admin_simular_sorteio_teste', {
+    p_pin: pin.trim(),
+  });
+  if (error || !data) {
+    throw extrairErro(error, 'Erro ao simular sorteio de teste.');
+  }
+  return data as ResultadoSorteio;
+}
+
+export async function adminLimparTeste(pin: string): Promise<number> {
+  const { data, error } = await supabase.rpc('admin_limpar_teste', {
+    p_pin: pin.trim(),
+  });
+  if (error) {
+    throw extrairErro(error, 'Erro ao limpar dados de teste.');
+  }
+  return Number((data as { removidos?: number })?.removidos) || 0;
+}
+
 export function exportarCsvRifa(
   pontos: PontoAdmin[],
   vendedores: Vendedor[],
